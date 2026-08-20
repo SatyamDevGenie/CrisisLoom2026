@@ -4,7 +4,7 @@ import { createApp } from "./app";
 import { env } from "./config/env";
 import { logger } from "./config/logger";
 import { connectDatabase } from "./config/database";
-import { redis } from "./config/redis";
+import { redis, waitForRedis } from "./config/redis";
 import { initSockets } from "./sockets/setup";
 import { startWorkers } from "./workers";
 
@@ -14,7 +14,7 @@ if (!fs.existsSync("logs")) {
 
 async function bootstrap() {
   await connectDatabase();
-  await redis.ping();
+  await waitForRedis();
 
   const app = createApp();
   const server = http.createServer(app);
@@ -23,6 +23,7 @@ async function bootstrap() {
 
   server.listen(env.PORT, () => {
     logger.info(`API running on port ${env.PORT}`);
+    logger.info(`Test route: http://localhost:${env.PORT}/`);
     logger.info(`Swagger docs at http://localhost:${env.PORT}/api/docs`);
   });
 

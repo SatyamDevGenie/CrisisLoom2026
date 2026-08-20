@@ -50,7 +50,6 @@ const volunteerSchema = new Schema<IVolunteer>(
 
 volunteerSchema.index({ location: "2dsphere" });
 volunteerSchema.index({ availability: 1, isVerified: 1 });
-volunteerSchema.index({ userId: 1 }, { unique: true });
 
 volunteerSchema.set("toJSON", { virtuals: true });
 

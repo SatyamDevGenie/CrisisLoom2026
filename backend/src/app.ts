@@ -30,6 +30,19 @@ export function createApp() {
   app.use(httpLogger);
   app.use(globalLimiter);
 
+  app.get("/", (_req, res) => {
+    res.json({
+      success: true,
+      statusCode: 200,
+      message: "CrisisLoom backend is running",
+      data: {
+        status: "ok",
+        health: `${env.API_PREFIX}/health`,
+        docs: "/api/docs",
+      },
+    });
+  });
+
   app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
   app.get("/api/docs.json", (_req, res) => res.json(swaggerSpec));
 

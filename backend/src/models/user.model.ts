@@ -38,7 +38,7 @@ const userSchema = new Schema<IUser>(
       lowercase: true,
       trim: true,
     },
-    phone: { type: String, trim: true, sparse: true },
+    phone: { type: String, trim: true },
     password: { type: String, required: true, minlength: 8, select: false },
     role: { type: String, enum: USER_ROLES, required: true },
     isActive: { type: Boolean, default: true },
@@ -59,7 +59,6 @@ const userSchema = new Schema<IUser>(
   { timestamps: true, versionKey: false }
 );
 
-userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ role: 1, isActive: 1 });
 userSchema.index({ phone: 1 }, { unique: true, sparse: true });
 

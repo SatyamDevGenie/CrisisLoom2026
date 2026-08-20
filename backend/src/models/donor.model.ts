@@ -41,7 +41,6 @@ const donorSchema = new Schema<IDonor>(
 );
 
 donorSchema.index({ location: "2dsphere" });
-donorSchema.index({ userId: 1 }, { unique: true });
 donorSchema.index({ donorType: 1 });
 
 donorSchema.set("toJSON", { virtuals: true });
