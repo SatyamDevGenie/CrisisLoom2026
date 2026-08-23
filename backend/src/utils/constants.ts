@@ -25,12 +25,22 @@ export const SOCKET_EVENTS = {
   DISASTER_UPDATED: "disaster:updated",
   DASHBOARD_STATS: "dashboard:stats",
   NOTIFICATION_NEW: "notification:new",
+  REQUEST_ESCALATED: "request:escalated",
 } as const;
 
 export const QUEUE_NAMES = {
   email: "email-queue",
   sms: "sms-queue",
   notification: "notification-queue",
+  dispatch: "dispatch-queue",
+  outbox: "outbox-queue",
+} as const;
+
+export const ESCALATION_RADII_METERS = [5000, 15000, 30000] as const;
+
+export const OUTBOX_EVENTS = {
+  REQUEST_CREATED: "request.created",
+  REQUEST_CRITICAL: "request.critical",
 } as const;
 
 export const COOKIE_NAMES = {

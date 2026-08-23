@@ -31,6 +31,10 @@ const envSchema = z.object({
   SEED_ADMIN_EMAIL: z.string().email().default("admin@crisisloom.local"),
   SEED_ADMIN_PASSWORD: z.string().min(8).default("Admin@12345"),
   DEFAULT_MATCH_RADIUS_METERS: z.coerce.number().default(10000),
+  ESCALATION_DELAY_MS: z.coerce.number().default(10 * 60 * 1000),
+  GEOFENCE_METERS: z.coerce.number().default(500),
+  FAIRNESS_RADIUS_METERS: z.coerce.number().default(5000),
+  OVERSERVED_THRESHOLD: z.coerce.number().default(3),
 });
 
 const parsed = envSchema.safeParse(process.env);

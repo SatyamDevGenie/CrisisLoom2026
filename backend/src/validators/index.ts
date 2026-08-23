@@ -294,3 +294,11 @@ export const listAssignmentQuery = z.object({
     request: objectId.optional(),
   }),
 });
+
+export const completeAssignmentSchema = z.object({
+  params: z.object({ id: objectId }),
+  body: z.object({
+    lng: z.coerce.number().min(-180).max(180).optional(),
+    lat: z.coerce.number().min(-90).max(90).optional(),
+  }),
+});

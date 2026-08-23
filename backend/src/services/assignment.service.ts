@@ -2,6 +2,7 @@ import Assignment from "../models/assignment.model";
 import ResourceRequest from "../models/resourceRequest.model";
 import Volunteer from "../models/volunteer.model";
 import Donor from "../models/donor.model";
+import Shelter from "../models/shelter.model";
 import { ApiError } from "../utils/ApiError";
 import { getPagination, paginationMeta } from "../utils/pagination";
 import { SOCKET_EVENTS } from "../utils/constants";
@@ -9,6 +10,9 @@ import { emitEvent } from "../sockets";
 import { logActivity } from "./activityLog.service";
 import { enqueueNotification } from "../queues";
 import User from "../models/user.model";
+import { distanceMeters, toGeoPoint } from "../utils/geo";
+import { env } from "../config/env";
+import type { UserRole } from "../types";
 
 export const assignmentService = {
   async create(
@@ -22,6 +26,14 @@ export const assignmentService = {
   ) {
     const request = await ResourceRequest.findById(input.request);
     if (!request) throw new ApiError(404, "Request not found");
+
+    const existingClaim = await Assignment.exists({
+      request: input.request,
+      status: { $in: ["accepted", "in_progress"] },
+    });
+    if (existingClaim) {
+      throw new ApiError(409, "This request is already claimed");
+    }
 
     const assignment = await Assignment.create({
       request: input.request,
@@ -87,69 +99,192 @@ export const assignmentService = {
   },
 
   async accept(userId: string, id: string) {
-    const assignment = await getOwnedAssignment(userId, id);
-    assignment.status = "accepted";
-    assignment.acceptedAt = new Date();
-    await assignment.save();
+    const { volunteer, donor } = await loadProfiles(userId);
+    const assigneeId = volunteer?.id || donor?.id;
+    if (!assigneeId) {
+      throw new ApiError(403, "You cannot update this assignment");
+    }
 
-    await ResourceRequest.findByIdAndUpdate(assignment.request, {
-      status: "in_progress",
-    });
-    await Volunteer.findOneAndUpdate({ userId }, { availability: "busy" });
+    const claimed = await Assignment.findOneAndUpdate(
+      { _id: id, assignee: assigneeId, status: "notified" },
+      { $set: { status: "accepted", acceptedAt: new Date() } },
+      { new: true }
+    );
 
-    emitEvent(SOCKET_EVENTS.ASSIGNMENT_UPDATED, assignment, "dashboard");
+    if (!claimed) {
+      const current = await Assignment.findById(id);
+      if (!current) throw new ApiError(404, "Assignment not found");
+      if (String(current.assignee) !== String(assigneeId)) {
+        throw new ApiError(403, "You cannot update this assignment");
+      }
+      if (current.status === "accepted" || current.status === "in_progress") {
+        return current;
+      }
+      throw new ApiError(409, "This assignment is no longer available to accept");
+    }
+
+    const requestClaimed = await ResourceRequest.findOneAndUpdate(
+      {
+        _id: claimed.request,
+        status: { $in: ["open", "matched"] },
+      },
+      { $set: { status: "in_progress" } },
+      { new: true }
+    );
+
+    if (!requestClaimed) {
+      await Assignment.findByIdAndUpdate(claimed.id, {
+        status: "cancelled",
+        notes: "Request already claimed by another responder",
+      });
+      throw new ApiError(409, "Another volunteer already claimed this request");
+    }
+
+    await Assignment.updateMany(
+      {
+        request: claimed.request,
+        _id: { $ne: claimed._id },
+        status: "notified",
+      },
+      { $set: { status: "cancelled", notes: "Request claimed by another responder" } }
+    );
+
+    if (volunteer) {
+      await Volunteer.findByIdAndUpdate(volunteer.id, { availability: "busy" });
+    }
+
+    emitEvent(SOCKET_EVENTS.ASSIGNMENT_UPDATED, claimed, "dashboard");
     await logActivity({
       actor: userId,
       action: "assignment.accepted",
       entityType: "Assignment",
       entityId: id,
     });
-    return assignment;
+    return claimed;
   },
 
   async reject(userId: string, id: string) {
-    const assignment = await getOwnedAssignment(userId, id);
-    assignment.status = "rejected";
-    await assignment.save();
+    const { volunteer, donor } = await loadProfiles(userId);
+    const assigneeId = volunteer?.id || donor?.id;
+    if (!assigneeId) throw new ApiError(403, "You cannot update this assignment");
+
+    const assignment = await Assignment.findOneAndUpdate(
+      { _id: id, assignee: assigneeId, status: "notified" },
+      { $set: { status: "rejected" } },
+      { new: true }
+    );
+    if (!assignment) {
+      throw new ApiError(409, "This assignment can no longer be rejected");
+    }
+
     emitEvent(SOCKET_EVENTS.ASSIGNMENT_UPDATED, assignment, "dashboard");
     return assignment;
   },
 
-  async complete(userId: string, id: string) {
-    const assignment = await getOwnedAssignment(userId, id);
-    assignment.status = "completed";
-    assignment.completedAt = new Date();
-    await assignment.save();
+  async complete(
+    userId: string,
+    id: string,
+    coords: { lng?: number; lat?: number },
+    role: UserRole
+  ) {
+    const { volunteer, donor } = await loadProfiles(userId);
+    const assignment = await Assignment.findById(id);
+    if (!assignment) throw new ApiError(404, "Assignment not found");
 
-    await Volunteer.findOneAndUpdate(
-      { userId },
-      { $inc: { completedMissions: 1 }, availability: "available" }
+    const isStaff = role === "admin" || role === "ngo_manager";
+    const owns =
+      (volunteer && String(assignment.assignee) === volunteer.id) ||
+      (donor && String(assignment.assignee) === donor.id);
+
+    if (!owns && !isStaff) {
+      throw new ApiError(403, "You cannot update this assignment");
+    }
+
+    if (!["accepted", "in_progress"].includes(assignment.status)) {
+      throw new ApiError(409, "Only an accepted assignment can be completed");
+    }
+
+    if (!isStaff) {
+      await assertArrivalGeofence(assignment.request.toString(), volunteer, donor, coords);
+    }
+
+    const completed = await Assignment.findOneAndUpdate(
+      { _id: id, status: { $in: ["accepted", "in_progress"] } },
+      { $set: { status: "completed", completedAt: new Date() } },
+      { new: true }
     );
-    await Donor.findOneAndUpdate({ userId }, { $inc: { totalDonations: 1 } });
+    if (!completed) {
+      throw new ApiError(409, "Assignment was already completed or cancelled");
+    }
 
-    emitEvent(SOCKET_EVENTS.ASSIGNMENT_UPDATED, assignment, "dashboard");
+    if (volunteer) {
+      if (coords.lng !== undefined && coords.lat !== undefined) {
+        volunteer.location = toGeoPoint(coords.lng, coords.lat);
+        await volunteer.save();
+      }
+      volunteer.completedMissions += 1;
+      volunteer.availability = "available";
+      await volunteer.save();
+    }
+    if (donor) {
+      await Donor.findByIdAndUpdate(donor.id, { $inc: { totalDonations: 1 } });
+    }
+
+    emitEvent(SOCKET_EVENTS.ASSIGNMENT_UPDATED, completed, "dashboard");
     await logActivity({
       actor: userId,
       action: "assignment.completed",
       entityType: "Assignment",
       entityId: id,
     });
-    return assignment;
+    return completed;
   },
 };
 
-async function getOwnedAssignment(userId: string, id: string) {
-  const assignment = await Assignment.findById(id);
-  if (!assignment) throw new ApiError(404, "Assignment not found");
+async function assertArrivalGeofence(
+  requestId: string,
+  volunteer: InstanceType<typeof Volunteer> | null,
+  donor: InstanceType<typeof Donor> | null,
+  coords: { lng?: number; lat?: number }
+) {
+  const request = await ResourceRequest.findById(requestId);
+  if (!request) throw new ApiError(404, "Request not found");
+  const shelter = await Shelter.findById(request.shelter);
+  if (!shelter) throw new ApiError(404, "Shelter not found");
 
-  const volunteer = await Volunteer.findOne({ userId });
-  const donor = await Donor.findOne({ userId });
-  const owns =
-    (volunteer && String(assignment.assignee) === volunteer.id) ||
-    (donor && String(assignment.assignee) === donor.id);
+  let point: [number, number] | null = null;
+  if (coords.lng !== undefined && coords.lat !== undefined) {
+    point = [coords.lng, coords.lat];
+  } else if (volunteer) {
+    point = volunteer.location.coordinates;
+  } else if (donor) {
+    point = donor.location.coordinates;
+  }
 
-  if (!owns) throw new ApiError(403, "You cannot update this assignment");
-  return assignment;
+  if (!point) {
+    throw new ApiError(400, "Current location (lng, lat) is required to complete this assignment");
+  }
+
+  const meters = distanceMeters(point, shelter.location.coordinates);
+  if (meters > env.GEOFENCE_METERS) {
+    throw new ApiError(
+      403,
+      `You must be within ${env.GEOFENCE_METERS}m of the shelter to complete this assignment. Current distance: ${Math.round(meters)}m.`
+    );
+  }
+
+  if (volunteer && coords.lng !== undefined && coords.lat !== undefined) {
+    volunteer.location = toGeoPoint(coords.lng, coords.lat);
+    await volunteer.save();
+  }
+}
+
+async function loadProfiles(userId: string) {
+  const [volunteer, donor] = await Promise.all([
+    Volunteer.findOne({ userId }),
+    Donor.findOne({ userId }),
+  ]);
+  return { volunteer, donor };
 }
 
 async function resolveAssigneeUser(

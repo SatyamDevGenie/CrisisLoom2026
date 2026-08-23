@@ -1,12 +1,14 @@
 import { Worker } from "bullmq";
 import { redis } from "../config/redis";
-import { QUEUE_NAMES } from "../utils/constants";
+import { QUEUE_NAMES, SOCKET_EVENTS } from "../utils/constants";
 import { logger } from "../config/logger";
 import { sendEmail } from "../services/email.service";
 import { sendSms } from "../services/sms.service";
 import Notification from "../models/notification.model";
 import { emitEvent } from "../sockets";
-import { SOCKET_EVENTS } from "../utils/constants";
+import { matchingService } from "../services/matching.service";
+import { flushOutbox } from "../services/outbox.processor";
+import { outboxQueue } from "../queues";
 
 export function startWorkers() {
   const emailWorker = new Worker(
@@ -56,7 +58,43 @@ export function startWorkers() {
     { connection: redis }
   );
 
-  for (const worker of [emailWorker, smsWorker, notificationWorker]) {
+  const dispatchWorker = new Worker(
+    QUEUE_NAMES.dispatch,
+    async (job) => {
+      const { requestId, actorId, nextStep } = job.data;
+      await matchingService.escalate(requestId, actorId, nextStep);
+    },
+    { connection: redis }
+  );
+
+  const outboxWorker = new Worker(
+    QUEUE_NAMES.outbox,
+    async () => {
+      await flushOutbox();
+    },
+    { connection: redis }
+  );
+
+  void outboxQueue.add(
+    "flush-outbox",
+    {},
+    {
+      repeat: { every: 5000 },
+      jobId: "outbox-repeat",
+      removeOnComplete: 20,
+      removeOnFail: 20,
+    }
+  );
+
+  const workers = [
+    emailWorker,
+    smsWorker,
+    notificationWorker,
+    dispatchWorker,
+    outboxWorker,
+  ];
+
+  for (const worker of workers) {
     worker.on("completed", (job) =>
       logger.info("Queue job completed", { queue: worker.name, jobId: job?.id })
     );
@@ -70,5 +108,11 @@ export function startWorkers() {
   }
 
   logger.info("BullMQ workers started");
-  return { emailWorker, smsWorker, notificationWorker };
+  return {
+    emailWorker,
+    smsWorker,
+    notificationWorker,
+    dispatchWorker,
+    outboxWorker,
+  };
 }

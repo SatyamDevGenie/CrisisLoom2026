@@ -9,6 +9,8 @@ export const smsQueue = new Queue(QUEUE_NAMES.sms, { connection });
 export const notificationQueue = new Queue(QUEUE_NAMES.notification, {
   connection,
 });
+export const dispatchQueue = new Queue(QUEUE_NAMES.dispatch, { connection });
+export const outboxQueue = new Queue(QUEUE_NAMES.outbox, { connection });
 
 export async function enqueueEmail(data: {
   to: string;
@@ -46,4 +48,31 @@ export async function enqueueNotification(data: {
     removeOnComplete: 200,
     removeOnFail: 50,
   });
+}
+
+export async function enqueueDispatchEscalation(
+  data: { requestId: string; actorId: string; nextStep: number },
+  delayMs: number
+) {
+  return dispatchQueue.add("escalate-dispatch", data, {
+    delay: delayMs,
+    attempts: 3,
+    backoff: { type: "exponential", delay: 2000 },
+    removeOnComplete: 100,
+    removeOnFail: 50,
+    jobId: `escalate:${data.requestId}:step:${data.nextStep}`,
+  });
+}
+
+export async function enqueueOutboxFlush() {
+  return outboxQueue.add(
+    "flush-outbox",
+    {},
+    {
+      attempts: 5,
+      backoff: { type: "exponential", delay: 1000 },
+      removeOnComplete: 50,
+      removeOnFail: 50,
+    }
+  );
 }

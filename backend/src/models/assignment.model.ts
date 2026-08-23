@@ -40,6 +40,14 @@ const assignmentSchema = new Schema<IAssignment>(
 assignmentSchema.index({ request: 1, assignee: 1 }, { unique: true });
 assignmentSchema.index({ assignee: 1, status: 1 });
 assignmentSchema.index({ status: 1, createdAt: -1 });
+assignmentSchema.index(
+  { request: 1 },
+  {
+    unique: true,
+    name: "one_active_claim_per_request",
+    partialFilterExpression: { status: { $in: ["accepted", "in_progress"] } },
+  }
+);
 
 assignmentSchema.set("toJSON", { virtuals: true });
 

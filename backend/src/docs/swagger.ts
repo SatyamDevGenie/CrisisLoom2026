@@ -136,7 +136,16 @@ export const swaggerSpec = swaggerJSDoc({
         post: { tags: ["Assignments"], summary: "Manually assign volunteer or donor" },
       },
       "/assignments/{id}/accept": {
-        post: { tags: ["Assignments"], summary: "Volunteer/donor accepts assignment" },
+        post: {
+          tags: ["Assignments"],
+          summary: "Atomic claim lock: only one accept wins",
+        },
+      },
+      "/assignments/{id}/complete": {
+        post: {
+          tags: ["Assignments"],
+          summary: "Complete assignment; volunteers must be within 500m of the shelter",
+        },
       },
       "/notifications": {
         get: { tags: ["Notifications"], summary: "My notifications" },

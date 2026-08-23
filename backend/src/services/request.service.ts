@@ -6,8 +6,8 @@ import { getPagination, paginationMeta } from "../utils/pagination";
 import { SOCKET_EVENTS, CACHE_KEYS } from "../utils/constants";
 import { emitEvent } from "../sockets";
 import { logActivity } from "./activityLog.service";
-import { matchingService } from "./matching.service";
 import { cacheService } from "./cache.service";
+import { createRequestWithOutbox } from "./outbox.service";
 import type { PriorityLevel, RequestStatus } from "../types";
 
 export const requestService = {
@@ -15,19 +15,7 @@ export const requestService = {
     const shelter = await Shelter.findById(input.shelter);
     if (!shelter) throw new ApiError(404, "Shelter not found");
 
-    const request = await ResourceRequest.create({
-      ...input,
-      requestedBy: userId,
-    });
-
-    emitEvent(SOCKET_EVENTS.REQUEST_CREATED, request, "dashboard");
-    emitEvent(SOCKET_EVENTS.REQUEST_CREATED, request, `shelter:${shelter.id}`);
-    await cacheService.del(CACHE_KEYS.dashboardStats);
-
-    if (request.priority === "critical") {
-      emitEvent(SOCKET_EVENTS.REQUEST_CRITICAL, request, "dashboard");
-      await matchingService.dispatchCriticalRequest(request.id, userId);
-    }
+    const request = await createRequestWithOutbox(userId, input);
 
     await logActivity({
       actor: userId,

@@ -37,6 +37,11 @@ export const rejectAssignment = asyncHandler(async (req: Request, res: Response)
 });
 
 export const completeAssignment = asyncHandler(async (req: Request, res: Response) => {
-  const assignment = await assignmentService.complete(req.user!.id, req.params.id);
+  const assignment = await assignmentService.complete(
+    req.user!.id,
+    req.params.id,
+    { lng: req.body.lng, lat: req.body.lat },
+    req.user!.role
+  );
   res.json(new ApiResponse(200, "Assignment completed", assignment));
 });

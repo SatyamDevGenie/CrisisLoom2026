@@ -168,6 +168,14 @@ location: {
 
 Accepting a task marks the volunteer `busy`. Completing it increments `completedMissions`.
 
+Unique coordination rules:
+
+1. **Escalating dispatch** — a critical request starts at 5km. If nobody accepts within `ESCALATION_DELAY_MS` (default 10 minutes), BullMQ expands to 15km, then 30km, then emails NGO admins.
+2. **Claim lock** — `POST /assignments/:id/accept` uses atomic `findOneAndUpdate` (`notified` → `accepted`) plus a request-level lock so two volunteers cannot take the same task.
+3. **Arrival geofence** — volunteers must complete from within 500m of the shelter. Send `{ "lng", "lat" }` on `POST /assignments/:id/complete`.
+4. **Anti-duplicate scoring** — before matching, CrisisLoom counts nearby open/fulfilled requests of the same resource. Overserved zones notify fewer volunteers so overlooked areas keep capacity.
+5. **Outbox events** — `request.created` / `request.critical` are written with the request (Mongo transaction when a replica set is available). A worker publishes sockets and dispatch jobs so alerts survive a Redis blip.
+
 ---
 
 ## Module 10 — Notifications, email, SMS, queues
@@ -177,6 +185,8 @@ BullMQ queues (Redis):
 - `email-queue`
 - `sms-queue`
 - `notification-queue`
+- `dispatch-queue` (delayed radius escalation)
+- `outbox-queue` (reliable event publish)
 
 Workers retry with exponential backoff. Missing SMTP/Twilio credentials fail open to structured logs so local development still runs.
 
@@ -200,6 +210,7 @@ Events:
 - `request:created`
 - `request:critical`
 - `request:updated`
+- `request:escalated`
 - `assignment:updated`
 - `volunteer:location`
 - `disaster:updated`
@@ -221,7 +232,7 @@ Also included:
 
 ## Collections
 
-`users`, `volunteers`, `donors`, `shelters`, `disasters`, `resources`, `resourcerequests`, `assignments`, `notifications`, `activitylogs`
+`users`, `volunteers`, `donors`, `shelters`, `disasters`, `resources`, `resourcerequests`, `assignments`, `notifications`, `activitylogs`, `outboxevents`
 
 ---
 

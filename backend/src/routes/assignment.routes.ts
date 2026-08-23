@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authenticate, authorize } from "../middleware/auth.middleware";
 import { validate } from "../middleware/validate.middleware";
 import {
+  completeAssignmentSchema,
   createAssignmentSchema,
   idParamSchema,
   listAssignmentQuery,
@@ -34,7 +35,7 @@ router.post(
 router.post(
   "/:id/complete",
   authorize("volunteer", "donor", "admin", "ngo_manager"),
-  validate(idParamSchema),
+  validate(completeAssignmentSchema),
   assignmentController.completeAssignment
 );
 

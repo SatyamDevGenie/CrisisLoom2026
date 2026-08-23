@@ -19,6 +19,11 @@ export interface IResourceRequest {
   status: RequestStatus;
   description?: string;
   neededBy?: Date;
+  dispatchRadiusMeters: number;
+  escalationStep: number;
+  escalationExhausted: boolean;
+  fairnessStatus: "underserved" | "balanced" | "overserved";
+  zoneAidCount: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -35,6 +40,15 @@ const resourceRequestSchema = new Schema<IResourceRequest>(
     status: { type: String, enum: REQUEST_STATUSES, default: "open" },
     description: { type: String, maxlength: 1000 },
     neededBy: Date,
+    dispatchRadiusMeters: { type: Number, default: 5000, min: 100 },
+    escalationStep: { type: Number, default: 0, min: 0, max: 3 },
+    escalationExhausted: { type: Boolean, default: false },
+    fairnessStatus: {
+      type: String,
+      enum: ["underserved", "balanced", "overserved"],
+      default: "balanced",
+    },
+    zoneAidCount: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true, versionKey: false }
 );
